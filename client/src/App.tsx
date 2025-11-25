@@ -6,6 +6,20 @@ import { Users, MessageSquare, Share2, Code2, LogIn, Plus } from 'lucide-react';
 import { useEditor } from './context/EditorContext';
 import Editor from '@monaco-editor/react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Avatar from './components/Avatar';
+
+const AVATAR_OPTIONS = [
+  '/avatars/avatar1.png',
+  '/avatars/avatar2.png',
+  '/avatars/avatar3.png',
+  '/avatars/avatar4.png',
+  '/avatars/avatar5.png',
+  '/avatars/avatar6.png',
+  '/avatars/avatar7.png',
+  '/avatars/avatar8.png',
+  '/avatars/avatar9.png',
+  '/avatars/avatar10.png',
+];
 
 // All supported languages for Monaco
 const ALL_LANGUAGES = [
@@ -30,10 +44,11 @@ function App() {
     code, setCode,
     users, setUsers,
     currentUser, setCurrentUser,
+    avatar, setAvatar,
     messages, addMessage
   } = useEditor();
 
-  const socketRef = useRef<Socket | null>(null); // persistent socket
+  const socketRef = useRef<Socket | null>(null);
   const [userName, setUserName] = useState('');
   const [inputMessage, setInputMessage] = useState('');
   const [isJoined, setIsJoined] = useState(false);
@@ -44,18 +59,18 @@ function App() {
   const [roomIdToJoin, setRoomIdToJoin] = useState('');
   const [roomNameForCreation, setRoomNameForCreation] = useState('');
 
-  // Read ?room=... from URL if present (for joining via link)
+  // Read ?room=... from URL if present
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const rid = params.get('room');
     if (rid) setRoomIdToJoin(rid.toUpperCase());
   }, []);
 
-  // Create Socket.IO connection once, keep it alive across re-mounts
+  // Create Socket.IO connection once
   useEffect(() => {
     if (!socketRef.current) {
       const s = io('http://localhost:5000', {
-        transports: ['polling', 'websocket'], // fallback for stability
+        transports: ['polling', 'websocket'],
         withCredentials: true,
         reconnection: true,
         reconnectionAttempts: 10,
@@ -66,10 +81,7 @@ function App() {
 
     const s = socketRef.current;
 
-    // Define handlers as named functions so we can off() them
-    const onConnect = () => {
-      console.log('✅ Connected to server, socket id:', s!.id);
-    };
+    const onConnect = () => console.log('✅ Connected to server, socket id:', s!.id);
     const onConnectError = (err: any) => {
       console.error('❌ Socket connect_error:', err?.message || err);
       toast.error('Failed to connect to server');
@@ -81,14 +93,10 @@ function App() {
         if (data.language) setLanguage(data.language);
       }
     };
-    const onLanguageUpdate = (newLanguage: string) => {
-      setLanguage(newLanguage);
-    };
+    const onLanguageUpdate = (newLanguage: string) => setLanguage(newLanguage);
     const onUsersUpdate = (usersList: any[]) => {
       setUsers(usersList);
-      if (s && usersList.some((u) => u.socketId === s.id)) {
-        setIsJoined(true);
-      }
+      if (s && usersList.some((u) => u.socketId === s.id)) setIsJoined(true);
     };
     const onNewMessage = (msg: any) => addMessage(msg);
     const onRoomCreated = (data: { roomId: string; users: any[] }) => {
@@ -97,7 +105,6 @@ function App() {
       setCurrentUser((prev) => prev || userName);
       setIsJoined(true);
 
-      // Update URL so it contains ?room=ROOMID for sharing
       const urlParams = new URLSearchParams(window.location.search);
       urlParams.set('room', data.roomId);
       window.history.replaceState({}, '', `${window.location.pathname}?${urlParams}`);
@@ -112,12 +119,8 @@ function App() {
       setIsJoined(true);
       toast.success(`Joined room ${roomIdToJoin}!`);
     };
-    const onDisconnect = () => {
-      console.log('🔌 Disconnected from server');
-      // We keep the socket alive (no disconnect here). UI can stay in room.
-    };
+    const onDisconnect = () => console.log('🔌 Disconnected from server');
 
-    // attach
     s!.on('connect', onConnect);
     s!.on('connect_error', onConnectError);
     s!.on('code-update', onCodeUpdate);
@@ -129,7 +132,6 @@ function App() {
     s!.on('join-success', onJoinSuccess);
     s!.on('disconnect', onDisconnect);
 
-    // Cleanup listeners only (DO NOT DISCONNECT socket here)
     return () => {
       s!.off('connect', onConnect);
       s!.off('connect_error', onConnectError);
@@ -149,14 +151,14 @@ function App() {
     const s = socketRef.current;
     if (!userName.trim()) return toast.error('Enter your name!');
     if (!roomIdToJoin.trim()) return toast.error('Room ID is required!');
+    if (!avatar) return toast.error('Please choose an avatar!');
     if (!s || !s.connected) return toast.error('Not connected to server yet');
 
     const rid = roomIdToJoin.toUpperCase();
     setRoomId(rid);
     setCurrentUser(userName);
 
-    s.emit('join-room', { roomId: rid, userName });
-    // isJoined will be set via join-success or users-update
+    s.emit('join-room', { roomId: rid, userName, avatar });
   };
 
   // Create new room
@@ -164,11 +166,11 @@ function App() {
     const s = socketRef.current;
     if (!userName.trim()) return toast.error('Enter your name!');
     if (!roomNameForCreation.trim()) return toast.error('Enter a room name!');
+    if (!avatar) return toast.error('Please choose an avatar!');
     if (!s || !s.connected) return toast.error('Not connected to server yet');
 
     setCurrentUser(userName);
-    s.emit('create-room', { roomName: roomNameForCreation, userName });
-    // isJoined will be set when room-created arrives
+    s.emit('create-room', { roomName: roomNameForCreation, userName, avatar });
   };
 
   // Send chat message
@@ -181,6 +183,7 @@ function App() {
       roomId,
       message: inputMessage,
       userName: currentUser || userName || 'Anonymous',
+      avatar,
     });
     setInputMessage('');
   };
@@ -220,6 +223,33 @@ function App() {
                     placeholder="Your Name"
                     className="w-full p-3 bg-slate-800/50 border border-purple-500/30 rounded-lg focus:ring-purple-500 text-white"
                   />
+
+                  {/* Avatar Selection */}
+                  <div>
+                    <p className="text-xs text-slate-400 mb-2">Choose an avatar:</p>
+                    <div className="grid grid-cols-5 gap-2 max-w-md mx-auto">
+                      {AVATAR_OPTIONS.map((url) => (
+                        <button
+                          key={url}
+                          type="button"
+                          onClick={() => setAvatar(url)}
+                          className={`rounded-full border p-0.5 transition-transform ${
+                            avatar === url
+                              ? 'border-purple-500 ring-2 ring-purple-500 scale-105'
+                              : 'border-transparent hover:border-slate-500 hover:scale-105'
+                          }`}
+                        >
+                          <img
+                            src={url}
+                            alt="avatar"
+                            className="rounded-full object-cover"
+                            style={{ width: 56, height: 56 }}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <input
                     type="text"
                     value={roomIdToJoin}
@@ -246,6 +276,33 @@ function App() {
                     placeholder="Your Name"
                     className="w-full p-3 bg-slate-800/50 border border-purple-500/30 rounded-lg focus:ring-purple-500 text-white"
                   />
+
+                  {/* Avatar Selection */}
+                  <div>
+                    <p className="text-xs text-slate-400 mb-2">Choose an avatar:</p>
+                    <div className="grid grid-cols-5 gap-2 max-w-md mx-auto">
+                      {AVATAR_OPTIONS.map((url) => (
+                        <button
+                          key={url}
+                          type="button"
+                          onClick={() => setAvatar(url)}
+                          className={`rounded-full border p-0.5 transition-transform ${
+                            avatar === url
+                              ? 'border-purple-500 ring-2 ring-purple-500 scale-105'
+                              : 'border-transparent hover:border-slate-500 hover:scale-105'
+                          }`}
+                        >
+                          <img
+                            src={url}
+                            alt="avatar"
+                            className="rounded-full object-cover"
+                            style={{ width: 56, height: 56 }}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <input
                     type="text"
                     value={roomNameForCreation}
@@ -282,7 +339,7 @@ function App() {
 
   // ------------- MAIN EDITOR / WORKSPACE SCREEN -------------
   return (
-    <div className="relative flex h-screen flex-col bg-[#050816] text-white overflow-hidden">
+    <div className="relative flex min-h-screen flex-col bg-[#050816] text-white overflow-y-auto">
       <Toaster position="top-right" />
 
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(129,140,248,0.12),transparent_55%),radial-gradient(circle_at_80%_80%,rgba(244,114,182,0.1),transparent_55%)] opacity-80" />
@@ -334,6 +391,7 @@ function App() {
       </header>
 
       <div className="relative z-10 flex flex-1 overflow-hidden">
+        {/* Editor Area */}
         <div className="relative flex-1 p-3">
           <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -366,12 +424,14 @@ function App() {
           </motion.div>
         </div>
 
+        {/* Sidebar – Users + Chat */}
         <motion.div
           initial={{ x: 260 }}
           animate={{ x: 0 }}
           transition={{ type: 'spring', stiffness: 90, damping: 16 }}
-          className="flex w-80 flex-col border-l border-purple-500/30 bg-black/70 backdrop-blur-2xl"
+          className="flex w-80 flex-col border-l border-purple-500/30 bg-black/70 backdrop-blur-2xl h-full"
         >
+          {/* Users */}
           <div className="border-b border-purple-500/30 px-4 py-3">
             <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-purple-200">
               <Users className="h-4 w-4 text-green-400" />
@@ -383,10 +443,15 @@ function App() {
                   key={user.socketId}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="flex items-center gap-2 rounded-lg border border-purple-500/20 bg-slate-900/80 px-3 py-2 text-xs"
+                  className="flex items-center gap-3 rounded-lg border border-purple-500/20 bg-slate-900/80 px-3 py-2 text-xs"
                 >
-                  <span className="h-2 w-2 rounded-full bg-green-400 animate-pulse" />
-                  <span className="text-slate-100">
+                  <img
+                    src={user.avatar || '/avatars/avatar1.png'}
+                    alt={user.userName}
+                    className="rounded-full object-cover flex-shrink-0"
+                    style={{ width: 32, height: 32 }}
+                  />
+                  <span className="text-slate-100 truncate">
                     {user.userName} {user.socketId === socketRef.current?.id ? '(You)' : ''}
                   </span>
                 </motion.div>
@@ -394,35 +459,51 @@ function App() {
             </div>
           </div>
 
+          {/* Chat */}
           <div className="flex flex-1 flex-col">
-            <div className="flex items-center gap-2 border-b border-purple-500/30 px-4 py-3 text-sm font-semibold text-blue-200">
+            <div className="flex items-center gap-2 border-b border-purple-500/30 px-3 py-2 text-xs font-semibold text-blue-200">
               <MessageSquare className="h-4 w-4 text-blue-400" />
               Room Chat
             </div>
 
-            <div className="flex-1 space-y-2 overflow-y-auto px-4 py-3 text-xs">
+            {/* Scrollable Messages - using fixed max-height relative to viewport height */}
+            <div
+              className="flex-1 space-y-2 overflow-y-auto px-4 py-3 text-xs"
+              style={{ maxHeight: 'calc(100vh - 220px)' }}
+            >
               {messages.map((msg: any) => (
                 <motion.div
                   key={msg.id}
-                  initial={{ opacity: 0, x: msg.userId === socketRef.current?.id ? 30 : -30 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  className={msg.userId === socketRef.current?.id ? 'text-right' : 'text-left'}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-start gap-2 my-1 pr-1"
                 >
+                  <img
+                    src={msg.avatar || '/avatars/avatar1.png'}
+                    alt={msg.userName}
+                    className="rounded-full object-cover flex-shrink-0"
+                    style={{ width: 24, height: 24 }}
+                  />
                   <div
-                    className={`inline-block max-w-[80%] rounded-lg border px-3 py-2 ${
+                    className={`rounded-lg border px-3 py-2 text-left ${
                       msg.userId === socketRef.current?.id
                         ? 'border-blue-500/40 bg-blue-600/70'
                         : 'border-slate-600/60 bg-slate-800/80'
                     }`}
+                    style={{
+                      maxWidth: 'calc(100% - 60px)',
+                      wordWrap: 'break-word',
+                    }}
                   >
-                    <p className="mb-0.5 text-[10px] opacity-80">{msg.userName}</p>
-                    <p className="text-[11px]">{msg.message}</p>
+                    <p className="mb-0.5 text-[10px] font-bold opacity-80">{msg.userName}</p>
+                    <p className="text-[11px] break-words">{msg.message}</p>
                   </div>
                 </motion.div>
               ))}
             </div>
 
-            <div className="flex gap-2 border-t border-purple-500/30 px-3 py-3">
+            {/* Input */}
+            <div className="flex gap-2 border-t border-purple-500/30 px-2 py-2">
               <input
                 type="text"
                 value={inputMessage}

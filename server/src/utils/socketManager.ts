@@ -12,7 +12,7 @@ class SocketManager {
     console.log('🔌 SocketManager initialized with empty rooms map');
   }
 
-  async joinRoom(roomId: string, socket: Socket, userName: string): Promise<void> {
+  async joinRoom(roomId: string, socket: Socket, userName: string, avatar?: string): Promise<void> {
     console.log(`🔧 Joining room: ${roomId} for user: ${userName} (socket: ${socket.id})`);
 
     socket.join(roomId);
@@ -44,7 +44,8 @@ class SocketManager {
     const user: User = {
       socketId: socket.id,
       userName,
-      joinedAt: new Date()
+      joinedAt: new Date(),
+      avatar
     };
 
     room.users.set(socket.id, user);
@@ -102,7 +103,8 @@ class SocketManager {
     const users = Array.from(room.users.values()).map(user => ({
       socketId: user.socketId,
       userName: user.userName,
-      joinedAt: user.joinedAt
+      joinedAt: user.joinedAt,
+      avatar: user.avatar,
     }));
 
     console.log(`📢 Broadcasting users for ${roomId}: ${users.length} online`);

@@ -2,6 +2,7 @@ export interface User {
   socketId: string;
   userName: string;
   joinedAt: Date;
+  avatar?: string; 
 }
 
 export interface Room {
@@ -22,6 +23,7 @@ export interface ChatMessage {
   userName: string;
   timestamp: Date;
   userId: string;
+  avatar?: string;
 }
 
 export interface SnippetData {

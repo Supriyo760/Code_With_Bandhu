@@ -1,16 +1,17 @@
 // src/context/EditorContext.tsx
-
 import React, { createContext, useContext, useState, ReactNode } from 'react';
 
 interface EditorContextType {
   roomId: string;
-  setRoomId: (id: string) => void; // <-- ADD THIS
+  setRoomId: (id: string) => void;
   code: string;
   setCode: (code: string) => void;
   users: any[];
   setUsers: (users: any[]) => void;
   currentUser: string;
   setCurrentUser: (user: string) => void;
+  avatar: string;
+  setAvatar: (url: string) => void;
   messages: any[];
   addMessage: (message: any) => void;
 }
@@ -22,6 +23,7 @@ export const EditorProvider = ({ children }: { children: ReactNode }) => {
   const [code, setCode] = useState('');
   const [users, setUsers] = useState([]);
   const [currentUser, setCurrentUser] = useState('');
+  const [avatar, setAvatar] = useState(''); // <- NEW
   const [messages, setMessages] = useState([]);
 
   const addMessage = (message: any) => {
@@ -29,7 +31,22 @@ export const EditorProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <EditorContext.Provider value={{ roomId, setRoomId, code, setCode, users, setUsers, currentUser, setCurrentUser, messages, addMessage }}>
+    <EditorContext.Provider
+      value={{
+        roomId,
+        setRoomId,
+        code,
+        setCode,
+        users,
+        setUsers,
+        currentUser,
+        setCurrentUser,
+        avatar,
+        setAvatar,
+        messages,
+        addMessage,
+      }}
+    >
       {children}
     </EditorContext.Provider>
   );

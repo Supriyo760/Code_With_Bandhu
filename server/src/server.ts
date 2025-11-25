@@ -54,7 +54,7 @@ io.on('connection', (socket) => {
   });
 
   // CREATE ROOM — SAVE TO DB FIRST
-socket.on('create-room', async ({ roomName, userName }) => {
+socket.on('create-room', async ({ roomName, userName, avatar }) => {
   try {
     const newRoomId = Math.random().toString(36).substring(2, 10).toUpperCase();
     
@@ -67,7 +67,7 @@ socket.on('create-room', async ({ roomName, userName }) => {
 
     // 2. Join via SocketManager (this will load from DB if needed)
     socket.join(newRoomId);
-    await socketManager.joinRoom(newRoomId, socket, userName);
+    await socketManager.joinRoom(newRoomId, socket, userName, avatar);
 
     // 3. Get users list from SocketManager
     const room = socketManager.getRoom(newRoomId);
@@ -92,8 +92,7 @@ socket.on('create-room', async ({ roomName, userName }) => {
 });
 
   // JOIN ROOM
-  socket.on('join-room', (data: { roomId: string; userName: string }) => {
-    const { roomId, userName } = data;
+  socket.on('join-room', async ({ roomId, userName, avatar }) => {
     const rid = roomId.toUpperCase();
 
     console.log(`➡️  ${userName} is trying to join room ${rid}`);
@@ -115,6 +114,7 @@ socket.on('create-room', async ({ roomName, userName }) => {
     // Optionally emit a join-success event
     socket.emit('join-success');
     console.log(`✅ ${userName} joined room ${rid}`);
+    await socketManager.joinRoom(rid, socket, userName, avatar);
   });
 
   // CODE CHANGE
@@ -132,8 +132,8 @@ socket.on('create-room', async ({ roomName, userName }) => {
   });
 
   // CHAT MESSAGE
-  socket.on('chat-message', (data: { roomId: string; message: string; userName: string }) => {
-    const { roomId, message, userName } = data;
+  socket.on('chat-message', (data: { roomId: string; message: string; userName: string; avatar?: string }) => {
+    const { roomId, message, userName, avatar } = data;
     if (!roomId || !message || !userName) return;
 
     socketManager.broadcastMessage(roomId, {
@@ -142,6 +142,7 @@ socket.on('create-room', async ({ roomName, userName }) => {
       userName,
       timestamp: new Date(),
       userId: socket.id,
+      avatar,
     });
   });
 
