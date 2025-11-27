@@ -76,25 +76,29 @@ class SocketManager {
     // }
   }
 
-  updateCode(roomId: string, code: string, userId: string): void {
-    const room = this.rooms.get(roomId);
-    if (!room) return;
+  public updateCode(roomId: string, code: string, userId: string, senderSocketId: string) {
+    const room = this.getRoom(roomId);
+    if (room) {
+        // Find the user by the ID of the socket that sent the message
+        const user = Array.from(room.users.values()).find(u => u.socketId === senderSocketId); // <-- FIXED
+        if (user) {
+            room.code = code;
+            // Broadcast the change to everyone in the room
+            this.io.to(roomId).emit('code-update', { roomId, code, userId: user.socketId });
+        }
+    }
+}
 
-    room.code = code;
-    this.io.to(roomId).emit('code-update', {
-      code,
-      userId,
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  updateLanguage(roomId: string, language: string): void {
-    const room = this.rooms.get(roomId);
-    if (!room) return;
-
-    room.language = language;
-    this.io.to(roomId).emit('language-update', language);
-  }
+  public updateLanguage(roomId: string, language: string, senderSocketId: string) {
+    const room = this.getRoom(roomId);
+    if (room) {
+        const user = Array.from(room.users.values()).find(u => u.socketId === senderSocketId); // <-- FIXED
+        if (user) {
+            room.language = language;
+            this.io.to(roomId).emit('language-update', language);
+        }
+    }
+}
 
   broadcastUsers(roomId: string): void {
     const room = this.rooms.get(roomId);

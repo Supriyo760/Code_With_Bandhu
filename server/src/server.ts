@@ -2,18 +2,28 @@
 
 import express, { Express, Request, Response } from 'express';
 import http from 'http';
-import { Server as SocketIOServer } from 'socket.io';
+import { Server as SocketIOServer, Socket } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { connectDB } from './config/database';
 import { errorHandler } from './middleware/errorHandler';
 import SocketManager from './utils/socketManager';
 import { v4 as uuidv4 } from 'uuid';
-import { Room } from './models/Room';
 
-// Routes
+// IMPORTANT: rename model import to avoid confusion with in-memory Room type
+import { Room as RoomModel } from './models/Room';
+
+// Types (only for hints)
+import type { User } from './types';
+
+// REST routes
+import runRoutes from './routes/run';
 import roomRoutes from './routes/rooms';
 import snippetRoutes from './routes/snippets';
+
+// Minimal typings for WebRTC signalling payloads (server only forwards JSON)
+type RTCSessionDescriptionInitLike = { type?: string; sdp?: string };
+type RTCIceCandidateInitLike = { candidate?: string; sdpMLineIndex?: number | null; sdpMid?: string | null };
 
 dotenv.config();
 
@@ -26,8 +36,7 @@ const io = new SocketIOServer(server, {
     methods: ['GET', 'POST', 'OPTIONS'],
     credentials: true,
   },
-  // Replace transports: ['websocket'] with this:
-  transports: ['polling', 'websocket'], // Default fallback (more stable)
+  transports: ['polling', 'websocket'],
   pingTimeout: 60000,
   pingInterval: 25000,
 });
@@ -43,140 +52,247 @@ app.use(
 
 // ---- SINGLE SOURCE OF TRUTH FOR ROOMS ----
 const socketManager = new SocketManager(io);
+type RoomState = {
+  language: string;
+  output: string;
+};
 
-// Socket.IO handlers
-io.on('connection', (socket) => {
+const roomState = new Map<string, RoomState>();
+
+// ---------------- Socket.IO connection handlers ----------------
+io.on('connection', (socket: Socket) => {
   console.log(`✅ Client connected: ${socket.id}`);
 
-  // Log all events for debugging
-  socket.onAny((event, ...args) => {
-    console.log(`📡 [${socket.id}] Event:`, event, args[0] ?? '');
-  });
+  socket.on(
+  'run-output',
+  (data: { roomId: string; output: string; language: string }) => {
+    const { roomId, output, language } = data;
+    console.log(`run-output from ${socket.id} in room ${roomId}`);
+    io.to(roomId).emit('run-output', { output, language });
 
-  // CREATE ROOM — SAVE TO DB FIRST
-socket.on('create-room', async ({ roomName, userName, avatar }) => {
-  try {
-    const newRoomId = Math.random().toString(36).substring(2, 10).toUpperCase();
-    
-    // Create room in database (fixed model name)
-    const dbRoom = await Room.create({
-      roomId: newRoomId,
-      name: roomName,
-      createdBy: userName
-    });
+  // 👇 Persist in roomState
+      const prev = roomState.get(roomId) || { language, output };
+      prev.language = language;
+      prev.output = output;
+      roomState.set(roomId, prev);
 
-    // 2. Join via SocketManager (this will load from DB if needed)
-    socket.join(newRoomId);
-    await socketManager.joinRoom(newRoomId, socket, userName, avatar);
-
-    // 3. Get users list from SocketManager
-    const room = socketManager.getRoom(newRoomId);
-    const users = room
-      ? Array.from(room.users.values()).map((u) => ({
-          socketId: u.socketId,
-          userName: u.userName,
-        }))
-      : [];
-
-    // 4. Send confirmation
-    socket.emit('room-created', {
-      roomId: newRoomId,
-      users,
-    });
-
-    console.log(`✅ Room created and saved to DB: ${newRoomId}`);
-  } catch (err) {
-    console.error(`❌ Failed to create room: ${err instanceof Error ? err.message : String(err)}`);
-    socket.emit('join-error', 'Failed to create room');
   }
-});
+);
 
-  // JOIN ROOM
-  socket.on('join-room', async ({ roomId, userName, avatar }) => {
-    const rid = roomId.toUpperCase();
-
-    console.log(`➡️  ${userName} is trying to join room ${rid}`);
-
-    const room = socketManager.getRoom(rid);
-    // console.log(
-    //   '   Existing rooms:',
-    //   Array.from(socketManager.getAllRooms().keys())
-    // );
-
-    if (!room) {
-      console.log(`❌ Room not found: ${rid}`);
-      socket.emit('join-error', 'Room not found!');
-      return;
+socket.on('get-call-peers', (roomId: string) => {
+    const callRoom = `${roomId}-call`;
+    const peers = io.sockets.adapter.rooms.get(callRoom);
+    if (peers) {
+        // Send list of existing peers to the new caller
+        socket.emit('call-peers-list', Array.from(peers).filter(id => id !== socket.id));
     }
+});
+  
+  // CREATE ROOM — save to DB first, then join in-memory room
+  socket.on(
+    'create-room',
+    async ({
+      roomName,
+      userName,
+      avatar,
+    }: {
+      roomName: string;
+      userName: string;
+      avatar?: string;
+    }) => {
+      try {
+        const newRoomId = Math.random().toString(36).substring(2, 10).toUpperCase();
 
-    socket.join(rid);
-    socketManager.joinRoom(rid, socket, userName);
-    // Optionally emit a join-success event
-    socket.emit('join-success');
-    console.log(`✅ ${userName} joined room ${rid}`);
-    await socketManager.joinRoom(rid, socket, userName, avatar);
-  });
+        await RoomModel.create({
+          roomId: newRoomId,
+          name: roomName,
+          createdBy: userName,
+        });
+
+        // 👇 ADD THIS
+        roomState.set(newRoomId, {
+          language: 'javascript', // default
+          output: '',             // no output yet
+        });
+
+        socket.join(newRoomId);
+        await socketManager.joinRoom(newRoomId, socket, userName, avatar);
+
+        const room = socketManager.getRoom(newRoomId);
+        const users = room
+          ? Array.from(room.users.values()).map((u: any) => ({
+              socketId: u.socketId,
+              userName: u.userName,
+              joinedAt: u.joinedAt,
+              avatar: u.avatar,
+            }))
+          : [];
+
+        socket.emit('room-created', { roomId: newRoomId, users });
+        console.log(`✅ Room created and saved to DB: ${newRoomId}`);
+      } catch (err) {
+        console.error(
+          `❌ Failed to create room: ${err instanceof Error ? err.message : String(err)}`
+        );
+        socket.emit('join-error', 'Failed to create room');
+      }
+    }
+  );
+
+  // JOIN ROOM — check existence (in memory or DB), then join once
+  socket.on(
+    'join-room',
+    async ({
+      roomId,
+      userName,
+      avatar,
+    }: {
+      roomId: string;
+      userName: string;
+      avatar?: string;
+    }) => {
+      const rid = roomId.toUpperCase();
+      console.log(`➡️  ${userName} is trying to join room ${rid}`);
+
+      const existsInMemory = socketManager.getRoom(rid);
+      const existsInDb =
+        existsInMemory ? true : !!(await RoomModel.findOne({ roomId: rid }));
+
+      if (!existsInDb) {
+        console.log(`❌ Room not found: ${rid}`);
+        socket.emit('join-error', 'Room not found!');
+        return;
+      }
+
+      socket.join(rid);
+      await socketManager.joinRoom(rid, socket, userName, avatar);
+
+      // 👇 NEW: send current language & last output to this socket
+      const state = roomState.get(rid);
+      if (state) {
+        // Current language
+        socket.emit('language-update', state.language);
+
+        // Last output, if any
+        if (state.output) {
+          socket.emit('run-output', {
+            output: state.output,
+            language: state.language,
+          });
+        }
+      }
+
+      socket.emit('join-success');
+      console.log(`✅ ${userName} joined room ${rid}`);
+    }
+  );
 
   // CODE CHANGE
   socket.on('code-change', (data: { roomId: string; code: string; userId: string }) => {
     const { roomId, code, userId } = data;
     if (!roomId) return;
-    socketManager.updateCode(roomId, code, userId);
+    socketManager.updateCode(roomId, code, userId, socket.id);
   });
 
   // LANGUAGE CHANGE
   socket.on('language-change', (data: { roomId: string; language: string }) => {
     const { roomId, language } = data;
     if (!roomId || !language) return;
-    socketManager.updateLanguage(roomId, language);
+    socketManager.updateLanguage(roomId, socket.id, language);
+    io.to(roomId).emit('language-update', language);
+
+  // 👇 Persist in roomState
+    const prev = roomState.get(roomId) || { language, output: '' };
+    prev.language = language;
+    roomState.set(roomId, prev);
+
   });
 
   // CHAT MESSAGE
-  socket.on('chat-message', (data: { roomId: string; message: string; userName: string; avatar?: string }) => {
-    const { roomId, message, userName, avatar } = data;
-    if (!roomId || !message || !userName) return;
+  socket.on(
+    'chat-message',
+    (data: { roomId: string; message: string; userName: string; avatar?: string }) => {
+      const { roomId, message, userName, avatar } = data;
+      if (!roomId || !message || !userName) return;
 
-    socketManager.broadcastMessage(roomId, {
-      id: uuidv4(),
-      message,
-      userName,
-      timestamp: new Date(),
-      userId: socket.id,
-      avatar,
-    });
-  });
+      socketManager.broadcastMessage(roomId, {
+        id: uuidv4(),
+        message,
+        userName,
+        timestamp: new Date(),
+        userId: socket.id,
+        avatar,
+      });
+    }
+  );
 
   // CURSOR POSITION (optional)
-  socket.on('cursor-position', (data: { roomId: string; position: any; userName: string }) => {
-    const { roomId, position, userName } = data;
-    if (!roomId || !position) return;
-    socketManager.broadcastCursorPosition(roomId, socket.id, userName, position);
+  socket.on(
+    'cursor-position',
+    (data: { roomId: string; position: any; userName: string }) => {
+      const { roomId, position, userName } = data;
+      if (!roomId || !position) return;
+      socketManager.broadcastCursorPosition(roomId, socket.id, userName, position);
+    }
+  );
+
+  // --- WebRTC video call signalling (server only relays JSON) ---
+  socket.on('join-call', (roomId: string) => {
+    const callRoom = `${roomId}-call`;
+    socket.join(callRoom);
+    socket.to(callRoom).emit('user-joined-call', socket.id);
+  });
+
+  socket.on(
+    'webrtc-offer',
+    (data: { roomId: string; to: string; offer: RTCSessionDescriptionInitLike }) => {
+      socket.to(data.to).emit('webrtc-offer', { from: socket.id, offer: data.offer });
+    }
+  );
+
+  socket.on(
+    'webrtc-answer',
+    (data: { roomId: string; to: string; answer: RTCSessionDescriptionInitLike }) => {
+      socket.to(data.to).emit('webrtc-answer', { from: socket.id, answer: data.answer });
+    }
+  );
+
+  socket.on(
+    'webrtc-ice-candidate',
+    (data: { roomId: string; to: string; candidate: RTCIceCandidateInitLike }) => {
+      socket.to(data.to).emit('webrtc-ice-candidate', {
+        from: socket.id,
+        candidate: data.candidate,
+      });
+    }
+  );
+
+  socket.on('leave-call', (roomId: string) => {
+    socket.to(roomId).emit('user-left-call', socket.id);
+    
   });
 
   // DISCONNECT
   socket.on('disconnect', () => {
-  console.log(`❌ Client disconnected: ${socket.id}`);
-  const rooms = socketManager.getAllRooms();
-  rooms.forEach((room, roomId) => {
-    if (room.users.has(socket.id)) {
-      // Remove user, but don't delete room
-      socketManager.leaveRoom(roomId, socket.id);
-    }
+    console.log(`❌ Client disconnected: ${socket.id}`);
+    const rooms = socketManager.getAllRooms();
+    rooms.forEach((room: any, roomId: string) => {
+      if (room.users.has(socket.id)) {
+        socketManager.leaveRoom(roomId, socket.id);
+      }
+    });
   });
 });
-});
 
-// API Routes
+// ---------------- API Routes ----------------
 app.use('/api/rooms', roomRoutes);
 app.use('/api/snippets', snippetRoutes);
+app.use('/api/run', runRoutes);
 
-// Debug endpoint to check rooms (visit http://localhost:5000/api/rooms)
-app.get('/api/rooms', (req: Request, res: Response) => {
+// Debug endpoint (avoid clashing with /api/rooms router)
+app.get('/api/debug/rooms', (req: Request, res: Response) => {
   const rooms = Array.from(socketManager.getAllRooms().keys());
-  res.json({ 
-    totalRooms: rooms.length,
-    rooms: rooms 
-  });
+  res.json({ totalRooms: rooms.length, rooms });
 });
 
 // Health check
