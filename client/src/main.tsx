@@ -10,6 +10,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   // <React.StrictMode>
     <EditorProvider>
       <App />
+      <Analytics />
     </EditorProvider>
   // </React.StrictMode>
 );
