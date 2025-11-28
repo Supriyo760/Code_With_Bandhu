@@ -24,6 +24,7 @@ import {
 import { useEditor } from './context/EditorContext';
 import Editor from '@monaco-editor/react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Analytics } from "@vercel/analytics/next";
 // import Avatar from './components/Avatar';
 
 // Pick backend URL based on env (dev vs prod)
